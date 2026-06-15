@@ -14,13 +14,13 @@ api_key = load_api_key()
 
 st.sidebar.title("⚙️ 设置")
 if api_key:
-    st.sidebar.success("✅ API Key 已配置")
+    st.sidebar.success("✅ DeepSeek API Key 已配置")
 else:
     st.sidebar.error("❌ 未找到 API Key")
     st.sidebar.info(
         "在项目目录创建 `.env` 文件并写入：\n\n"
-        "```\nANTHROPIC_API_KEY=sk-ant-...\n```\n\n"
-        "获取 Key: https://console.anthropic.com/"
+        "```\nDEEPSEEK_API_KEY=sk-...\n```\n\n"
+        "获取 Key: https://platform.deepseek.com/api_keys"
     )
 
 st.sidebar.divider()

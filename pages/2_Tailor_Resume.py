@@ -1,15 +1,12 @@
 """Tailor a resume to a job description — the core workflow."""
-import io
-
-import anthropic
 import streamlit as st
+from openai import AuthenticationError
 
-from config import CLAUDE_MODEL
+from config import DEEPSEEK_MODEL
 from db.engine import init_db
 from services.claude_client import extract_jd_from_screenshot, tailor_resume_stream
 from services.docx_exporter import export_to_docx
 from services.resume_service import (
-    get_resume,
     list_resumes,
     save_tailored_resume,
 )
@@ -23,10 +20,8 @@ st.title("🎯 定制简历")
 # ── API Key check ──────────────────────────────────────────────────────────
 api_key = load_api_key()
 if not api_key:
-    st.error("❌ 未配置 API Key。请在项目目录创建 `.env` 文件并写入 `ANTHROPIC_API_KEY=...`")
+    st.error("❌ 未配置 API Key。请在项目目录创建 `.env` 文件并写入 `DEEPSEEK_API_KEY=...`")
     st.stop()
-
-client = anthropic.Anthropic(api_key=api_key)
 
 # ── Step 1: Select base resume ─────────────────────────────────────────────
 
@@ -89,7 +84,7 @@ with tab_image:
         if st.button("🔍 提取文字", type="secondary"):
             with st.spinner("AI 正在识别截图中的文字..."):
                 try:
-                    extracted = extract_jd_from_screenshot(client, uploaded.getvalue())
+                    extracted = extract_jd_from_screenshot(api_key, uploaded.getvalue())
                     st.session_state["extracted_jd"] = extracted
                 except Exception as e:
                     st.error(f"提取失败: {e}")
@@ -154,7 +149,7 @@ if generate_clicked:
     with st.spinner("AI 正在为你定制简历..."):
         try:
             stream = tailor_resume_stream(
-                client, base_text, jd_text, extra_instructions=extra
+                api_key, base_text, jd_text, extra_instructions=extra
             )
             for chunk in stream:
                 full_output += chunk
@@ -171,10 +166,8 @@ if generate_clicked:
                 height=500,
                 key="final_output",
             )
-        except anthropic.AuthenticationError:
-            st.error("API Key 无效，请检查 `.env` 文件中的 ANTHROPIC_API_KEY。")
-        except anthropic.RateLimitError:
-            st.error("API 调用频率超限，请稍后重试。")
+        except AuthenticationError:
+            st.error("API Key 无效，请检查 `.env` 文件中的 DEEPSEEK_API_KEY。")
         except Exception as e:
             st.error(f"生成失败: {e}")
 
@@ -224,4 +217,4 @@ if generate_clicked:
                     st.error(f"导出失败: {e}")
 
         # Also show model info
-        st.caption(f"🤖 使用模型: {CLAUDE_MODEL} | 输出长度: {len(full_output)} 字符")
+        st.caption(f"🤖 使用模型: {DEEPSEEK_MODEL} (DeepSeek) | 输出长度: {len(full_output)} 字符")

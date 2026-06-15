@@ -7,7 +7,9 @@ DATA_DIR = BASE_DIR / "data"
 DB_PATH = DATA_DIR / "resumes.db"
 EXPORT_DIR = DATA_DIR / "exports"
 
-CLAUDE_MODEL = os.getenv("CLAUDE_MODEL", "claude-sonnet-4-6")
+# DeepSeek API settings
+DEEPSEEK_BASE_URL = "https://api.deepseek.com"
+DEEPSEEK_MODEL = os.getenv("DEEPSEEK_MODEL", "deepseek-chat")
 
 # Ensure data directories exist at import time
 DATA_DIR.mkdir(exist_ok=True)

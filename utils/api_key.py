@@ -1,4 +1,4 @@
-"""Load ANTHROPIC_API_KEY from .env file or environment variable."""
+"""Load DEEPSEEK_API_KEY from .env file or environment variable."""
 import os
 from pathlib import Path
 
@@ -14,4 +14,4 @@ def load_api_key() -> str | None:
     if env_path.exists():
         load_dotenv(env_path)
 
-    return os.getenv("ANTHROPIC_API_KEY")
+    return os.getenv("DEEPSEEK_API_KEY")
