@@ -12,6 +12,7 @@ from PIL import Image
 
 from config import DEEPSEEK_BASE_URL, DEEPSEEK_MODEL
 from prompts.jd_extraction import JD_EXTRACTION_SYSTEM, JD_EXTRACTION_USER
+from prompts.resume_generation import GENERATE_RESUME_SYSTEM, GENERATE_RESUME_USER
 from prompts.resume_tailoring import TAILORING_SYSTEM, TAILORING_USER
 
 
@@ -110,6 +111,40 @@ def tailor_resume_stream(
         max_tokens=8192,
         messages=[
             {"role": "system", "content": TAILORING_SYSTEM},
+            {"role": "user", "content": user_message},
+        ],
+        stream=True,
+    )
+
+    for chunk in stream:
+        if chunk.choices and chunk.choices[0].delta.content:
+            yield chunk.choices[0].delta.content
+
+
+# ── Resume Generation from Description ─────────────────────────────────────
+
+
+def generate_resume_stream(
+    api_key: str,
+    description: str,
+) -> Iterator[str]:
+    """Generate a formal base resume from a casual self-description.
+
+    Args:
+        api_key: DeepSeek API key.
+        description: Casual self-description text.
+
+    Yields:
+        Text chunks from the streaming response.
+    """
+    client = _build_client(api_key)
+    user_message = GENERATE_RESUME_USER.format(description=description)
+
+    stream = client.chat.completions.create(
+        model=DEEPSEEK_MODEL,
+        max_tokens=8192,
+        messages=[
+            {"role": "system", "content": GENERATE_RESUME_SYSTEM},
             {"role": "user", "content": user_message},
         ],
         stream=True,

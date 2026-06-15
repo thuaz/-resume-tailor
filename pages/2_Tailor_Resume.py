@@ -1,4 +1,4 @@
-"""定制简历核心流程 — 选基础简历 → 输入JD → AI生成 → 导出Word。"""
+"""定制简历 — 详细信息流（高级用户和从首页跳转过来的人用）。"""
 import streamlit as st
 from openai import AuthenticationError
 
@@ -6,12 +6,10 @@ from config import DEEPSEEK_MODEL
 from db.engine import init_db
 from services.claude_client import extract_jd_from_screenshot, tailor_resume_stream
 from services.docx_exporter import export_to_docx
-from services.resume_service import (
-    list_resumes,
-    save_tailored_resume,
-)
+from services.resume_service import list_resumes, save_tailored_resume
 from utils.api_key import load_api_key
 from utils.file_parser import extract_text
+from utils.jd_fetcher import fetch_jd_from_url
 
 init_db()
 
@@ -24,242 +22,203 @@ if not api_key:
     st.error("❌ 未配置 API Key。请在项目目录创建 `.env` 文件并写入 `DEEPSEEK_API_KEY=...`")
     st.stop()
 
-# ── 第一步：选择基础简历 ─────────────────────────────────────────────────
+# ── 第一步：基础简历 ──────────────────────────────────────────────────────
 
-st.subheader("第一步：选择基础简历")
+st.subheader("第一步：基础简历")
 resumes = list_resumes()
 
 use_ad_hoc = False
 selected_resume = None
+base_text = ""
 
 if not resumes:
-    st.info("还没有保存的简历。你可以直接在下方文本框中描述自己，或者先上传 Word/PDF 文件，或者去「管理简历」页面创建一份。")
+    st.info("还没有保存的简历。上传文件或者直接写几行描述，或者去「管理简历」创建。")
     use_ad_hoc = True
 else:
     tab_select, tab_ad_hoc = st.tabs(["从已保存中选择", "临时输入或上传文件"])
 
     with tab_select:
+        last_used = st.session_state.get("last_resume_id")
+        last_idx = 0
+        if last_used:
+            for i, r in enumerate(resumes):
+                if r.id == last_used:
+                    last_idx = i
+                    break
         resume_names = [r.name for r in resumes]
-        chosen = st.selectbox("选择一份基础简历", resume_names, label_visibility="collapsed")
+        chosen = st.selectbox("选择一份", resume_names, index=last_idx)
         if chosen:
             selected_resume = next(r for r in resumes if r.name == chosen)
-            with st.expander("📄 预览选中的简历"):
-                st.text(selected_resume.content[:2000])
+            base_text = selected_resume.content
+            with st.expander("👀 预览"):
+                st.text(base_text[:2000])
 
     with tab_ad_hoc:
         use_ad_hoc = True
 
 if use_ad_hoc:
-    # 支持上传文件自动填充
-    uploaded_resume = st.file_uploader(
-        "📂 上传简历文件（Word / PDF），自动解析",
+    uploaded = st.file_uploader(
+        "📂 上传简历文件（Word / PDF），或直接在下方面描述",
         type=["docx", "pdf"],
-        key="adhoc_resume_upload",
-        help="上传 .docx 或 .pdf 简历文件，自动提取文本填入下方编辑区。",
+        key="adtail_upload",
     )
-    if uploaded_resume is not None:
-        if st.button("📖 解析上传的简历", type="secondary", key="parse_adhoc"):
-            with st.spinner("正在解析简历文件..."):
-                try:
-                    text = extract_text(uploaded_resume.getvalue(), uploaded_resume.name)
-                    st.session_state["adhoc_parsed"] = text
-                    st.success(f"✅ 已解析，共 {len(text)} 字")
-                except Exception as e:
-                    st.error(f"解析失败: {e}")
+    if uploaded and st.button("📖 解析上传的简历", key="adtail_parse"):
+        with st.spinner("解析中..."):
+            try:
+                base_text = extract_text(uploaded.getvalue(), uploaded.name)
+                st.success(f"✅ 共 {len(base_text)} 字")
+            except Exception as e:
+                st.error(f"失败: {e}")
 
-    default_text = st.session_state.get("adhoc_parsed", "")
     ad_hoc_text = st.text_area(
-        "输入你的背景描述或简历",
-        value=default_text,
+        "简历内容（可直接写，也可等上传解析自动填入）",
+        value=base_text,
         height=300,
-        placeholder="你可以上传 Word/PDF 文件自动填充，或自由描述：教育背景、工作/实习经历、项目经历、技能...",
-        key="ad_hoc_text",
+        placeholder="随便写几行描述自己，AI 能理解。也可以上传 Word/PDF 文件自动填入。",
+        key="adtail_text",
     )
+    base_text = ad_hoc_text
 
 st.divider()
 
-# ── 第二步：输入岗位 JD ────────────────────────────────────────────────
+# ── 第二步：岗位 JD ────────────────────────────────────────────────────────
 
-st.subheader("第二步：输入岗位 JD")
-tab_text, tab_image, tab_file = st.tabs(["📝 粘贴文本", "📸 上传截图", "📄 上传文件"])
+st.subheader("第二步：岗位 JD")
+tab_link, tab_text, tab_image, tab_file = st.tabs(
+    ["🔗 粘贴链接", "📝 粘贴文字", "📸 上传截图", "📄 上传文件"]
+)
 
 jd_text = ""
 
+with tab_link:
+    jd_url = st.text_input("招聘页面网址", placeholder="https://...", key="adtail_url")
+    if jd_url and st.button("🌐 抓取", key="adtail_fetch"):
+        with st.spinner("抓取中..."):
+            try:
+                jd_text = fetch_jd_from_url(jd_url)
+                st.success(f"✅ {len(jd_text)} 字")
+            except Exception as e:
+                st.error(f"❌ {e}")
+    if jd_text:
+        jd_text = st.text_area("抓取结果（可修改）", value=jd_text, height=250, key="adtail_url_result")
+
 with tab_text:
     jd_text = st.text_area(
-        "岗位描述 (JD)",
-        height=250,
-        placeholder="把招聘网站上的岗位要求、职责描述粘贴到这里...",
-        key="jd_text_paste",
+        "岗位描述", height=250, placeholder="粘贴招聘要求...", key="adtail_paste"
     )
 
 with tab_image:
-    uploaded_img = st.file_uploader(
-        "上传 JD 截图（PNG / JPG）",
-        type=["png", "jpg", "jpeg"],
-        key="jd_screenshot",
-    )
-    if uploaded_img is not None:
-        st.image(uploaded_img, caption="上传的截图", use_container_width=True)
-        if st.button("🔍 提取文字", type="secondary", key="extract_ocr"):
-            with st.spinner("AI 正在识别截图中的文字..."):
+    uploaded_img = st.file_uploader("截图", type=["png", "jpg", "jpeg"], key="adtail_img")
+    if uploaded_img:
+        st.image(uploaded_img, width=400)
+        if st.button("🔍 识别", key="adtail_ocr"):
+            with st.spinner("识别中..."):
                 try:
-                    extracted = extract_jd_from_screenshot(api_key, uploaded_img.getvalue())
-                    st.session_state["extracted_jd"] = extracted
+                    jd_text = extract_jd_from_screenshot(api_key, uploaded_img.getvalue())
+                    st.success("✅")
                 except Exception as e:
-                    st.error(f"提取失败: {e}")
-
-        if "extracted_jd" in st.session_state and st.session_state["extracted_jd"]:
-            jd_text = st.text_area(
-                "提取结果（可编辑修正）",
-                value=st.session_state["extracted_jd"],
-                height=300,
-                key="jd_text_extracted",
-            )
+                    st.error(f"{e}")
+        if jd_text:
+            jd_text = st.text_area("识别结果", value=jd_text, height=250, key="adtail_ocr_result")
 
 with tab_file:
-    uploaded_jd_file = st.file_uploader(
-        "上传 JD 文件（Word / PDF）",
-        type=["docx", "pdf"],
-        key="jd_file_upload",
-        help="有些岗位JD是Word或PDF文件，直接上传即可解析。",
-    )
-    if uploaded_jd_file is not None:
-        if st.button("📖 解析 JD 文件", type="secondary", key="parse_jd_file"):
-            with st.spinner("正在解析 JD 文件..."):
-                try:
-                    text = extract_text(uploaded_jd_file.getvalue(), uploaded_jd_file.name)
-                    st.session_state["parsed_jd"] = text
-                    st.success(f"✅ 已解析，共 {len(text)} 字")
-                except Exception as e:
-                    st.error(f"解析失败: {e}")
-
-    if "parsed_jd" in st.session_state and st.session_state["parsed_jd"]:
-        jd_text = st.text_area(
-            "解析结果（可编辑修正）",
-            value=st.session_state["parsed_jd"],
-            height=300,
-            key="jd_text_file",
-        )
+    uploaded_jd = st.file_uploader("JD 文件", type=["docx", "pdf"], key="adtail_jdfile")
+    if uploaded_jd and st.button("📖 解析", key="adtail_jdparse"):
+        with st.spinner("解析中..."):
+            try:
+                jd_text = extract_text(uploaded_jd.getvalue(), uploaded_jd.name)
+                st.success(f"✅ {len(jd_text)} 字")
+            except Exception as e:
+                st.error(f"{e}")
+    if jd_text:
+        jd_text = st.text_area("解析结果", value=jd_text, height=250, key="adtail_jdresult")
 
 st.divider()
 
-# ── 第三步：额外指令 ─────────────────────────────────────────────────────
+# ── 第三步：额外要求 ──────────────────────────────────────────────────────
 
-st.subheader("第三步：额外指令（可选）")
-extra = st.text_input(
-    "有什么特殊要求？",
-    placeholder="例如: 控制在一页以内 / 突出项目管理经验 / 面向高级职位 / 强调某项技能",
-)
+st.subheader("第三步：额外要求（可选）")
+extra = st.text_input("特殊要求？", placeholder="例如: 一页以内 / 突出项目经历", key="adtail_extra")
 
 st.divider()
 
-# ── 第四步：生成定制简历 ───────────────────────────────────────────────
+# ── 第四步：生成 ──────────────────────────────────────────────────────────
 
-st.subheader("第四步：生成定制简历")
-
-# 确定基础简历文本
-base_text = ""
-if selected_resume and not use_ad_hoc:
-    base_text = selected_resume.content
-elif use_ad_hoc:
-    base_text = ad_hoc_text
-
+st.subheader("第四步：生成")
 can_generate = bool(base_text.strip()) and bool(jd_text.strip())
-
 if not can_generate:
-    st.warning("👆 请先完成第一步（基础简历）和第二步（岗位 JD）")
+    st.warning("👆 还差基础简历和岗位 JD")
 
 gen_col1, gen_col2 = st.columns([1, 3])
 with gen_col1:
     generate_clicked = st.button(
-        "🚀 生成定制简历",
-        type="primary",
-        disabled=not can_generate,
-        use_container_width=True,
+        "🚀 生成定制简历", type="primary", disabled=not can_generate, use_container_width=True
     )
 with gen_col2:
     if not can_generate:
-        missing = []
-        if not base_text.strip():
-            missing.append("基础简历")
-        if not jd_text.strip():
-            missing.append("岗位JD")
-        st.caption(f"还需填写: {', '.join(missing)}")
+        st.caption(f"还差: {'基础简历' if not base_text.strip() else ''} {' / ' if not base_text.strip() and not jd_text.strip() else ''} {'岗位JD' if not jd_text.strip() else ''}")
 
 if generate_clicked:
-    output_placeholder = st.empty()
-
+    placeholder = st.empty()
     full_output = ""
-    with st.spinner("🤖 AI 正在为你定制简历，请稍候..."):
+    with st.spinner("🤖 正在定制..."):
         try:
-            stream = tailor_resume_stream(
-                api_key, base_text, jd_text, extra_instructions=extra
-            )
-            for chunk in stream:
+            for chunk in tailor_resume_stream(api_key, base_text, jd_text, extra):
                 full_output += chunk
-                output_placeholder.text_area(
-                    "定制结果（实时输出中）",
-                    value=full_output + "▌",
-                    height=500,
-                    key="streaming_output",
-                )
-            # 最终渲染（去掉光标）
-            output_placeholder.text_area(
-                "定制结果",
-                value=full_output,
-                height=500,
-                key="final_output",
-            )
+                placeholder.text_area("生成中", value=full_output + "▌", height=400, key="adtail_stream")
+            placeholder.text_area("生成中", value=full_output, height=400, key="adtail_final", label_visibility="collapsed")
         except AuthenticationError:
-            st.error("❌ API Key 无效，请检查 `.env` 文件中的 DEEPSEEK_API_KEY 是否正确。")
+            st.error("❌ API Key 无效")
+            st.stop()
         except Exception as e:
-            st.error(f"❌ 生成失败: {e}")
+            st.error(f"❌ {e}")
+            st.stop()
 
-    if full_output:
-        st.session_state["tailored_output"] = full_output
-        st.session_state["tailored_jd"] = jd_text
-        st.session_state["tailored_base_id"] = (
-            selected_resume.id if selected_resume else None
-        )
+    # 格式化预览
+    st.divider()
+    st.subheader("📋 预览")
+    prev_col, act_col = st.columns([3, 1])
+    with prev_col:
+        with st.container(border=True):
+            st.markdown(full_output)
+    with act_col:
+        auto_company = ""
+        for line in jd_text.split("\n")[:5]:
+            line = line.strip()
+            if any(kw in line for kw in ["公司", "有限", "科技", "技术"]):
+                auto_company = line[:30]
+                break
+        company = st.text_input("公司", value=auto_company, placeholder="如: 字节", key="adtail_company")
+        role = st.text_input("岗位", placeholder="如: 后端", key="adtail_role")
 
-        # ── 第五步：保存与导出 ──────────────────────────────────────────
-        st.divider()
-        st.subheader("第五步：保存与导出")
-
-        save_col, export_col, _ = st.columns([1, 1, 2])
-
-        with save_col:
-            company = st.text_input("公司名称（可选）", key="company_hint", placeholder="如: 字节跳动")
-            role = st.text_input("岗位名称（可选）", key="role_hint", placeholder="如: 后端开发工程师")
-            if st.button("💾 保存到历史", use_container_width=True):
-                if st.session_state["tailored_base_id"]:
-                    save_tailored_resume(
-                        source_resume_id=st.session_state["tailored_base_id"],
-                        job_description=jd_text,
-                        tailored_text=full_output,
-                        company_hint=company,
-                        role_hint=role,
-                    )
-                    st.success("✅ 已保存到历史记录")
+        if st.button("💾 保存", use_container_width=True, key="adtail_save"):
+            try:
+                if selected_resume:
+                    rid = selected_resume.id
                 else:
-                    st.warning("⚠️ 临时输入的简历不会关联到已保存的简历，但仍可导出 Word。")
+                    from services.resume_service import create_resume
+                    r = create_resume(role or company or "定制", base_text, "")
+                    rid = r.id
+                save_tailored_resume(rid, jd_text, full_output, company, role)
+                st.success("✅ 已保存")
+            except Exception as e:
+                st.warning(f"{e}")
 
-        with export_col:
-            if st.button("📥 下载 Word 文件", type="primary", use_container_width=True):
-                try:
-                    path = export_to_docx(full_output, company, role)
-                    with open(path, "rb") as f:
-                        st.download_button(
-                            label="📥 点击下载 .docx",
-                            data=f,
-                            file_name=path.name,
-                            mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-                            use_container_width=True,
-                        )
-                    st.success(f"✅ 文件已生成: {path.name}")
-                except Exception as e:
-                    st.error(f"❌ 导出失败: {e}")
+        st.divider()
+        if st.button("📥 下载 Word", type="primary", use_container_width=True, key="adtail_dl"):
+            try:
+                path = export_to_docx(full_output, company, role)
+                with open(path, "rb") as f:
+                    st.download_button(
+                        "点击下载", f, file_name=path.name,
+                        mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                        use_container_width=True,
+                    )
+                st.success(f"✅ {path.name}")
+            except Exception as e:
+                st.error(f"{e}")
 
-        # 显示模型信息
-        st.caption(f"🤖 使用模型: {DEEPSEEK_MODEL} (DeepSeek) | 输出字数: {len(full_output)} 字符")
+        if selected_resume:
+            st.session_state["last_resume_id"] = selected_resume.id
+
+    st.caption(f"🤖 {DEEPSEEK_MODEL} | {len(full_output)} 字")
