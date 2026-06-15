@@ -46,6 +46,17 @@ def _build_document(text: str) -> Document:
     _setup_page(doc)
     _setup_default_style(doc)
 
+    # Map English section markers to Chinese Word headings
+    heading_map = {
+        "PROFESSIONAL SUMMARY": "个人概述",
+        "SUMMARY": "个人概述",
+        "SKILLS": "技能",
+        "EXPERIENCE": "工作经历",
+        "EDUCATION": "教育背景",
+        "PROJECTS": "项目经历",
+        "RECOMMENDATIONS": "差距与建议",
+    }
+
     sections = _parse_sections(text)
 
     for sec_type, sec_content in sections:
@@ -53,24 +64,14 @@ def _build_document(text: str) -> Document:
             _render_name(doc, sec_content)
         elif sec_type == "CONTACT":
             _render_contact(doc, sec_content)
-        elif sec_type in ("PROFESSIONAL SUMMARY", "SUMMARY"):
-            _render_section_heading(doc, "PROFESSIONAL SUMMARY")
-            _render_body(doc, sec_content)
-        elif sec_type == "SKILLS":
-            _render_section_heading(doc, "SKILLS")
-            _render_skills(doc, sec_content)
-        elif sec_type == "EXPERIENCE":
-            _render_section_heading(doc, "EXPERIENCE")
-            _render_experience(doc, sec_content)
-        elif sec_type == "EDUCATION":
-            _render_section_heading(doc, "EDUCATION")
-            _render_body(doc, sec_content)
-        elif sec_type == "PROJECTS":
-            _render_section_heading(doc, "PROJECTS")
-            _render_experience(doc, sec_content)
-        elif sec_type == "RECOMMENDATIONS":
-            _render_section_heading(doc, "RECOMMENDATIONS")
-            _render_body(doc, sec_content)
+        elif sec_type in heading_map:
+            _render_section_heading(doc, heading_map[sec_type])
+            if sec_type in ("SKILLS",):
+                _render_skills(doc, sec_content)
+            elif sec_type in ("EXPERIENCE", "PROJECTS"):
+                _render_experience(doc, sec_content)
+            else:
+                _render_body(doc, sec_content)
         else:
             # Unknown section — render as plain body
             if sec_content.strip():

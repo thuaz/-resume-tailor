@@ -1,4 +1,4 @@
-"""View and re-export past tailored resumes."""
+"""查看历史定制记录，支持重新导出 Word。"""
 import streamlit as st
 
 from db.engine import init_db
@@ -19,19 +19,19 @@ if not tailored_list:
     st.info("还没有定制记录。去「定制简历」页面生成第一份吧。")
     st.stop()
 
-st.caption(f"共 {len(tailored_list)} 条记录")
+st.caption(f"共 {len(tailored_list)} 条记录，最新在前")
 
 for tr in tailored_list:
-    source_name = tr.source_resume.name if tr.source_resume else "(已删除)"
-    label_parts = [source_name]
+    source_name = tr.source_resume.name if tr.source_resume else "(已删除的简历)"
+    label_parts = [f"📄 {source_name}"]
     if tr.company_hint:
         label_parts.append(f"→ {tr.company_hint}")
     if tr.role_hint:
         label_parts.append(f"| {tr.role_hint}")
-    label_parts.append(f"| {tr.created_at.strftime('%Y-%m-%d %H:%M')}")
+    label_parts.append(f"| 🕐 {tr.created_at.strftime('%Y-%m-%d %H:%M')}")
 
     with st.expander("  ".join(label_parts)):
-        # Preview
+        # 预览定制结果
         st.text_area(
             "定制简历预览",
             value=tr.tailored_text[:3000],
@@ -39,7 +39,7 @@ for tr in tailored_list:
             key=f"preview_{tr.id}",
             disabled=True,
         )
-        st.caption(f"JD 原文: {tr.job_description[:200]}...")
+        st.caption(f"📋 原始 JD 前 200 字: {tr.job_description[:200]}...")
 
         c1, c2 = st.columns([1, 3])
         with c1:
@@ -47,12 +47,13 @@ for tr in tailored_list:
                 path = export_to_docx(tr.tailored_text, tr.company_hint, tr.role_hint)
                 with open(path, "rb") as f:
                     st.download_button(
-                        label="点击下载",
+                        label="点击下载 .docx",
                         data=f,
                         file_name=path.name,
                         mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
                     )
         with c2:
-            if st.button("🗑 删除记录", key=f"del_hist_{tr.id}"):
+            if st.button("🗑 删除此记录", key=f"del_hist_{tr.id}"):
                 delete_tailored_resume(tr.id)
+                st.success("已删除")
                 st.rerun()
